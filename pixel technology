@@ -1,0 +1,85 @@
+#include <iostream>
+#include <opencv2/opencv.hpp>
+#include <vector>
+#include <algorithm>
+
+using namespace cv;
+using namespace std;
+
+// Function to divide image into overlapping blocks
+vector<Mat> divideIntoBlocks(const Mat& image, int blockSize, int overlap) {
+    vector<Mat> blocks;
+    for (int i = 0; i <= image.rows - blockSize; i += (blockSize - overlap)) {
+        for (int j = 0; j <= image.cols - blockSize; j += (blockSize - overlap)) {
+            Rect block(j, i, blockSize, blockSize);
+            blocks.push_back(image(block));
+        }
+    }
+    return blocks;
+}
+
+// Feature extraction using Mean or other suitable features
+vector<double> extractFeatures(const Mat& block) {
+    Scalar meanVal = mean(block);  // You can add more sophisticated features here
+    return {meanVal[0]};
+}
+
+// Sort blocks lexicographically based on extracted features
+void sortBlocks(vector<pair<vector<double>, Rect>>& blocksFeatures) {
+    sort(blocksFeatures.begin(), blocksFeatures.end(), 
+         [](const pair<vector<double>, Rect>& a, const pair<vector<double>, Rect>& b) {
+             return lexicographical_compare(a.first.begin(), a.first.end(), b.first.begin(), b.first.end());
+         });
+}
+
+// Compare features of adjacent blocks to detect forgery
+vector<Rect> detectForgeryRegions(const vector<pair<vector<double>, Rect>>& sortedBlocks, double threshold) {
+    vector<Rect> forgedRegions;
+    for (size_t i = 1; i < sortedBlocks.size(); i++) {
+        double diff = norm(sortedBlocks[i].first - sortedBlocks[i - 1].first);
+        if (diff < threshold) {
+            forgedRegions.push_back(sortedBlocks[i].second);
+        }
+    }
+    return forgedRegions;
+}
+
+int main() {
+    Mat image = imread("image.jpg", IMREAD_GRAYSCALE);
+    if (image.empty()) {
+        cout << "Error loading image!" << endl;
+        return -1;
+    }
+
+    int blockSize = 16;  // Block size in pixels
+    int overlap = 8;     // Overlap in pixels
+    double threshold = 10.0; // Threshold to identify similar blocks
+
+    // Step 1: Divide image into overlapping blocks
+    vector<Mat> blocks = divideIntoBlocks(image, blockSize, overlap);
+
+    // Step 2: Extract features from each block
+    vector<pair<vector<double>, Rect>> blocksFeatures;
+    for (int i = 0; i < blocks.size(); ++i) {
+        vector<double> features = extractFeatures(blocks[i]);
+        blocksFeatures.push_back({features, Rect(i % image.cols, i / image.cols, blockSize, blockSize)});
+    }
+
+    // Step 3: Lexicographically sort the blocks based on extracted features
+    sortBlocks(blocksFeatures);
+
+    // Step 4: Detect forged regions based on feature similarity
+    vector<Rect> forgedRegions = detectForgeryRegions(blocksFeatures, threshold);
+
+    // Step 5: Display results
+    for (const auto& region : forgedRegions) {
+        rectangle(image, region, Scalar(255, 0, 0), 2); // Draw rectangle around forged regions
+    }
+
+    imshow("Forgery Detection Result", image);
+    waitKey(0);
+
+    return 0;
+}
+
+g++ forgery_detection.cpp -o forgery_detection `pkg-config --cflags --libs opencv4`
